@@ -3,11 +3,11 @@
 
 Goal
 ----
-The goal of this project is to observe a signicant improvement in the performance of a web application by implementing a Redis cluster using Amazon ElastiCache to cache database queries in a simple Python application.
+The goal of this project is to observe a significant improvement in the performance of a web application by implementing a Redis cluster using Amazon ElastiCache to cache database queries in a simple Python application.
 
 Project Description
 -------------------
-This project has two main steps.  First, implement a LAMP style web application using Linux, NGINX, PostGreSQL and Python.  Measure the performance of a Python application that is intentionalyy made slow.  Second, add an Redis ElastiCache to the web application and observe the improvement in performance.
+This project has two main steps.  First, implement a LAMP style web application using Linux, NGINX, PostGreSQL and Python.  Measure the performance of a Python application that is intentionally made slow.  Second, add an Redis ElastiCache to the web application and observe the improvement in performance.
 
 Main Steps
 ----------
