@@ -1,0 +1,12 @@
+.vscode
+config_images
+*.v*.py
+*.v*.yaml
+*.v*.js
+*.v*.html
+*.v*.css
+*.v*.php
+*.pptx
+*.docx
+*.json
+*.txt

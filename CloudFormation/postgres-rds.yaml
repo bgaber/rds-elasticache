@@ -1,0 +1,428 @@
+---
+# Brian Gaber
+# ElastiCache Cloudformation Template
+# Stack can be created from the console or from the AWS CLI.
+# If stack is created from the console then resources will be created in the region shown in the upper right.
+# If stack is created from the AWS CLI then the region flag must be used or the stack will be created in the AWS default region (us-east-1).
+# Example of creating stack from the AWS CLI:
+# aws --region us-east-2 cloudformation create-stack --stack-name myteststack --template-body file://postgres-rds.yaml --parameters ParameterKey=KeyPairName,ParameterValue=us-east-2
+
+# This CloudFormation Template will create:
+# - Custom VPC
+# - Two Private Subnets in two AZs for Database and Redis cache
+# - One Public for nginx webserver
+# - Internet Gateway
+# - Public Route Table
+# - Public Network ACL
+# - Two Security Groups (Web and DB)
+# - RDS PostgreSQL Database
+# - Webserver EC2 Instance (requires EC2 key pair which are region based)
+# - Database Migration Service (DMS) IAM CloudWatch Role
+
+Parameters:
+  LatestLinuxAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: "[-_ a-zA-Z0-9]*"
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: can contain only alphanumeric characters, spaces, slashes and underscores.
+  VPCName:
+    Description: VPC Name
+    Default: PostGres VPC
+    Type: String
+  DBName:
+    Default: lordsdb
+    Description: Name of the PostgreSQL database
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+  DBAllocatedStorage:
+    Default: '20'
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: '20'
+    MaxValue: '65536'
+    ConstraintDescription: must be between 20 and 65536 GiB.
+  DBAdminName:
+    Default: lordofthecastle
+    Description: Username for PostgreSQL database access
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBAdminPwd:
+    NoEcho: 'true'
+    Description: Password PostgreSQL database access
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  DBSvrSecurityGroupDescription:
+    Description: PostgreSQL Database Security Group Description
+    Default: DB SG
+    Type: String
+        
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: 10.0.0.0/16
+    Public:
+      CIDR: 10.0.0.0/24
+    Private2:
+      CIDR: 10.0.2.0/24
+    Private1:
+      CIDR: 10.0.1.0/24
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      CidrBlock: !FindInMap 
+        - SubnetConfig
+        - VPC
+        - CIDR
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Public
+        - Key: Name
+          Value: !Ref VPCName
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - '0'
+        - !GetAZs ''
+      CidrBlock: !FindInMap 
+        - SubnetConfig
+        - Private1
+        - CIDR
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Private1
+        - Key: Name
+          Value: Private1
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - '1'
+        - !GetAZs ''
+      CidrBlock: !FindInMap 
+        - SubnetConfig
+        - Private2
+        - CIDR
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Private2
+        - Key: Name
+          Value: Private2
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - '0'
+        - !GetAZs ''
+      CidrBlock: !FindInMap 
+        - SubnetConfig
+        - Public
+        - CIDR
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Public
+        - Key: Name
+          Value: Public
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Public
+  GatewayToInternet:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Public
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  PublicNetworkAcl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Application
+          Value: !Ref AWS::StackName
+        - Key: Network
+          Value: Public
+  InboundHTTPPublicNetworkAclEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '102'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '80'
+        To: '80'
+  InboundSSHPublicNetworkAclEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '103'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '22'
+        To: '22'
+  InboundEmphemeralPublicNetworkAclEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '104'
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '1024'
+        To: '65535'
+  OutboundPublicNetworkAclEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: '100'
+      Protocol: '-1'
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '0'
+        To: '65535'
+  PublicSubnetNetworkAclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      NetworkAclId: !Ref PublicNetworkAcl
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable access
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Ref DBSvrSecurityGroupDescription
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: DatabaseSG
+      SecurityGroupIngress:
+        - CidrIp: 10.0.0.0/16
+          IpProtocol: tcp
+          FromPort: '5432'
+          ToPort: '5432'
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref DBAllocatedStorage
+      BackupRetentionPeriod: '7'
+      DBInstanceClass: db.t2.micro
+      DBName: !Ref DBName
+      Engine: postgres
+      MasterUsername: !Ref DBAdminName
+      MasterUserPassword: !Ref DBAdminPwd
+      VPCSecurityGroups:
+        - !GetAtt 
+          - DatabaseSecurityGroup
+          - GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: false
+      StorageType: gp2
+  PublicInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: GatewayToInternet
+    Properties:
+      InstanceType: t2.micro
+      KeyName: 
+        Ref: KeyPairName
+      ImageId: !Ref LatestLinuxAmiId
+      NetworkInterfaces:
+        - GroupSet:
+            - !Ref EC2SecurityGroup
+          PrivateIpAddress: 10.0.0.120
+          AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: NGINX WebServer
+      UserData: 
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install git -y
+          yum install postgresql -y
+          yum install postgresql-devel -y
+          yum install python2-pip -y
+          yum install python-pip-wheel -y
+          yum install gcc -y
+          amazon-linux-extras install nginx1 -y
+          pip install psycopg2
+          pip install ConfigParser
+          pip install Flask
+          pip install redis
+          echo 'location /app {'                                                        >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_pass         http: //127.0.0.1:5000/;'                         >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_redirect     off;'                                             >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_set_header   Host                 $host;'                      >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_set_header   X-Real-IP            $remote_addr;'               >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_set_header   X-Forwarded-For      $proxy_add_x_forwarded_for;' >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_set_header   X-Forwarded-Proto    $scheme;'                    >> /etc/nginx/default.d/nginx-app.conf
+          echo '}'                                                                      >> /etc/nginx/default.d/nginx-app.conf
+          systemctl start nginx
+          systemctl enable nginx
+
+  # Database Migration Service (DMS)
+  DMSCloudwatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: dms-cloudwatch-logs-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - dms.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VPCName
+      - Label:
+          default: "Security Groups"
+        Parameters:
+          - DBSvrSecurityGroupDescription
+      - Label:
+          default: "Database"
+        Parameters:
+          - DBName
+          - DBAllocatedStorage
+          - DBAdminName
+          - DBAdminPwd
+    ParameterLabels:
+      DBName:
+        default: "What is the name for the PostGreSQL database?"
+      DBAllocatedStorage:
+       default: "The size of the database (GiB)"
+      DBAdminName:
+        default: "What is the username for the PostGreSQL Administrator?"
+      DBAdminPwd:
+        default: "What is the password for the PostGreSQL Administrator?"
+      DBSvrSecurityGroupDescription:
+        default: "What is the name for the PostgreSQL DB Security Group?"
+        
+Outputs:
+  pubIpAddress1:
+    Description: Public IP address of the NGINX WebServer
+    Value: !GetAtt 
+      - PublicInstance
+      - PublicIp
+  psqlEndPtAddr:
+    Description: PostGreSQL Endpoint Address
+    Value: !GetAtt Database.Endpoint.Address
+  psqlEndPtPort: 
+    Description: PostGreSQL Endpoint Port
+    Value: !GetAtt Database.Endpoint.Port
+  StackEC2SG:
+    Description: EC2 Security Group used as source to Cache Security Group
+    Value: !Ref EC2SecurityGroup
+    Export:
+      Name: EC2SGforPSQL
+  PrivateSubnet1:
+    Description: Database Subnet #1
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: DBSubnet1
+  PrivateSubnet2:
+    Description: Database Subnet #2
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: DBSubnet2
+  VPCID:
+    Description: Database VPC
+    Value: !Ref VPC
+    Export:
+      Name: DBVPC
+  stacksRegion:
+    Value: !Ref "AWS::Region"

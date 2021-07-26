@@ -1,0 +1,87 @@
+---
+# Brian Gaber
+# ElastiCache Replication Group Cloudformation Template
+# Stack can be created from the console or from the AWS CLI.
+# If stack is created from the console then resources will be created in the region shown in the upper right.
+# If stack is created from the AWS CLI then the region flag must be used or the stack will be created in the AWS default region (us-east-1).
+# Example of creating stack from the AWS CLI:
+# aws --region us-east-2 cloudformation create-stack --stack-name myteststack --template-body file://redis-cache.yaml --parameters ParameterKey=KeyPairName,ParameterValue=us-east-2
+
+# This CloudFormation Template imports the following three variables from postgres-rds.yaml
+# - VPC Id
+# - PrivateSubnet1
+# - PrivateSubnet2
+
+Parameters:
+  CacheName:
+    Description: Redis Replication Group Name (1 - 40 alphanumeric characters or hyphens)
+    MinLength: 1
+    MaxLength: 40
+    ConstraintDescription: Cache name must contain from 1 to 40 alphanumeric characters or hyphens.  The first character must be a letter.  A name cannot end with a hyphen or contain two consecutive hyphens.
+    Type: String
+  CacheDescription:
+    Description: Redis Replication Group Description (5 - 64 alphanumeric characters or hyphens)
+    MinLength: 5
+    MaxLength: 64
+    ConstraintDescription: Cache description must contain from 5 to 64 alphanumeric characters or hyphens.
+    Type: String
+
+Resources:
+  ElasticacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Elasticache Security Group
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 6379
+        ToPort: 6379
+        SourceSecurityGroupId: !ImportValue EC2SGforPSQL
+      VpcId: !ImportValue DBVPC
+      Tags:
+        - Key: Name
+          Value: 'Cache SG'
+
+  SubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Cache Subnet Group
+      SubnetIds:
+        - !ImportValue DBSubnet1
+        - !ImportValue DBSubnet2
+      Tags:
+        - Key: Name
+          Value: 'Cache Subnet Group'
+
+  ElasticacheReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      Engine: redis
+      AutomaticFailoverEnabled: true
+      CacheNodeType: cache.t2.micro
+      ReplicationGroupDescription: !Ref CacheDescription
+      ReplicationGroupId: !Ref CacheName
+      MultiAZEnabled: true
+      NumNodeGroups: 1
+      ReplicasPerNodeGroup: 2
+      CacheSubnetGroupName: !Ref SubnetGroup
+      SecurityGroupIds:
+        - !Ref ElasticacheSecurityGroup
+      Tags:
+        - Key: Name
+          Value: 'Cache Rep Group'
+
+Outputs:
+  redisPriEndPtAddr:
+    Description: Redis Cache Primary Endpoint Address
+    Value: !GetAtt ElasticacheReplicationGroup.PrimaryEndPoint.Address
+  redisPriEndPtPort:
+    Description: Redis Cache Primary Endpoint Port
+    Value: !GetAtt ElasticacheReplicationGroup.PrimaryEndPoint.Port
+  redisRdEndPtAddr:
+    Description: Redis Cache Reader Endpoint Address
+    Value: !GetAtt ElasticacheReplicationGroup.ReaderEndPoint.Address
+  redisRdEndPtPort:
+    Description: Redis Cache Reader Endpoint Port
+    Value: !GetAtt ElasticacheReplicationGroup.ReaderEndPoint.Port
+  stacksRegion:
+    Value: !Ref "AWS::Region"
