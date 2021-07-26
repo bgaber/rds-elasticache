@@ -7,10 +7,11 @@
 # Example of creating stack from the AWS CLI:
 # aws --region us-east-2 cloudformation create-stack --stack-name myteststack --template-body file://redis-cache.yaml --parameters ParameterKey=KeyPairName,ParameterValue=us-east-2
 
-# This CloudFormation Template imports the following three variables from postgres-rds.yaml
+# This CloudFormation Template imports the following four outputs from postgres-rds.yaml
 # - VPC Id
 # - PrivateSubnet1
 # - PrivateSubnet2
+# - Webserver Security Group
 
 Parameters:
   CacheName:
