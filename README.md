@@ -26,6 +26,6 @@ The diagram below depicts the architecture I implemented.  The entire architectu
 
 References
 ----------
-#CloudGuruChallenge: Improve application performance using Amazon ElastiCache - https://acloudguru.com/blog/engineering/cloudguruchallenge-improve-application-performance-using-amazon-elasticache
+[#CloudGuruChallenge: Improve application performance using Amazon ElastiCache](https://acloudguru.com/blog/engineering/cloudguruchallenge-improve-application-performance-using-amazon-elasticache)
 
-Lab: Using ElastiCache to Improve Database Performance - https://acloudguru.com/hands-on-labs/using-elasticache-to-improve-database-performance
+[Lab: Using ElastiCache to Improve Database Performance](https://acloudguru.com/hands-on-labs/using-elasticache-to-improve-database-performance)
