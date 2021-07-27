@@ -337,7 +337,7 @@ Resources:
           pip install Flask
           pip install redis
           echo 'location /app {'                                                        >> /etc/nginx/default.d/nginx-app.conf
-          echo '   proxy_pass         http: //127.0.0.1:5000/;'                         >> /etc/nginx/default.d/nginx-app.conf
+          echo '   proxy_pass         http://127.0.0.1:5000/;'                          >> /etc/nginx/default.d/nginx-app.conf
           echo '   proxy_redirect     off;'                                             >> /etc/nginx/default.d/nginx-app.conf
           echo '   proxy_set_header   Host                 $host;'                      >> /etc/nginx/default.d/nginx-app.conf
           echo '   proxy_set_header   X-Real-IP            $remote_addr;'               >> /etc/nginx/default.d/nginx-app.conf
